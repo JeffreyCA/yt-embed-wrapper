@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yt-embed-wrapper</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 720px; margin: 40px auto; padding: 0 20px; font: 15px/1.5 system-ui, sans-serif; }
+  h1 { font-size: 24px; margin-bottom: 4px; }
+  p { margin: 8px 0; }
+  form { display: flex; gap: 8px; margin: 20px 0 12px; }
+  input { flex: 1; padding: 8px 10px; font: inherit; }
+  button { padding: 8px 14px; font: inherit; }
+  label { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; }
+  .frame { aspect-ratio: 16 / 9; background: #000; }
+  iframe { display: block; width: 100%; height: 100%; border: 0; }
+  pre { min-height: 5em; padding: 10px; overflow: auto; background: rgb(127 127 127 / 12%); font-size: 12px; }
+  code { font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>yt-embed-wrapper</h1>
+<p>A small page that holds a YouTube player for you, so videos that won't embed from <code>localhost</code> or an IP address play anyway. <a href="https://github.com/JeffreyCA/yt-embed-wrapper">Source and docs on GitHub</a>.</p>
+
+<form id="form">
+  <input id="video" value="Zi_XLOBDo_Y" aria-label="YouTube video id or URL" placeholder="Video id or URL">
+  <button type="submit">Load</button>
+  <label><input type="checkbox" id="nocookie" checked> nocookie</label>
+</form>
+<div class="frame"><iframe id="embed" title="YouTube player" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
+<pre id="log" aria-live="polite"></pre>
+
+<script>
+  var embed = document.getElementById('embed');
+  var log = document.getElementById('log');
+  var ready = false;
+  var pending = null;
+
+  function parseId(text) {
+    var match = /(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([\w-]{11})/.exec(text) || /^([\w-]{11})$/.exec(text.trim());
+    return match ? match[1] : null;
+  }
+
+  function mount() {
+    ready = false;
+    var nocookie = document.getElementById('nocookie').checked;
+    embed.src = 'embed.html' + (nocookie ? '' : '?nocookie=0');
+  }
+
+  function send(message) {
+    message.type = 'yt-embed';
+    embed.contentWindow.postMessage(message, location.origin);
+  }
+
+  window.addEventListener('message', function (event) {
+    if (event.origin !== location.origin || !event.data || event.data.type !== 'yt-embed') return;
+    if (event.data.event !== 'time') log.textContent += JSON.stringify(event.data) + '\n';
+    if (event.data.event === 'ready') {
+      ready = true;
+      if (pending) { send({ command: 'load', videoId: pending }); pending = null; }
+    }
+  });
+
+  document.getElementById('form').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var id = parseId(document.getElementById('video').value);
+    if (!id) { log.textContent += 'Not a YouTube video id or URL.\n'; return; }
+    log.textContent = '';
+    if (ready) send({ command: 'load', videoId: id });
+    else { pending = id; mount(); }
+  });
+
+  document.getElementById('nocookie').addEventListener('change', function () {
+    var id = parseId(document.getElementById('video').value);
+    pending = id;
+    mount();
+  });
+
+  pending = 'Zi_XLOBDo_Y';
+  mount();
+</script>
+</body>
+</html>

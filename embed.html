@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>YouTube player</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+  #player { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+  /*
+   * A YouTube player controlled by the page that embeds this one. YouTube
+   * won't play many label-owned videos when the embedding page is localhost or
+   * an IP address, but it's happy when the player sits on a real hostname,
+   * which is what this page provides.
+   *
+   * Messages in both directions look like { type: 'yt-embed', ... }; the
+   * README lists the events and commands. The first `load` binds the wrapper
+   * to whoever sent it and everyone else is ignored from then on. `?v=<id>`
+   * loads a video directly, and `?nocookie=0` switches off youtube-nocookie.com.
+   */
+  var TYPE = 'yt-embed';
+  var params = new URLSearchParams(location.search);
+  // Privacy-enhanced mode by default: no cookies until the visitor presses play.
+  var host = params.get('nocookie') === '0' ? 'https://www.youtube.com' : 'https://www.youtube-nocookie.com';
+  var player = null;
+  var owner = null;
+  var ownerOrigin = null;
+  var timer = null;
+  // A muted load stays muted: the clock below re-mutes whatever the player's
+  // own chrome or an ad did, until an unmute command lifts the hold.
+  var holdMute = false;
+
+  function emit(message) {
+    message.type = TYPE;
+    if (owner) {
+      owner.postMessage(message, ownerOrigin);
+    } else if (window.parent !== window) {
+      window.parent.postMessage(message, '*');
+    }
+  }
+
+  function startClock() {
+    stopClock();
+    timer = setInterval(function () {
+      if (!player || player.getPlayerState() !== YT.PlayerState.PLAYING) return;
+      if (holdMute && !player.isMuted()) player.mute();
+      emit({ event: 'time', seconds: player.getCurrentTime(), duration: player.getDuration() });
+    }, 250);
+  }
+
+  function stopClock() {
+    if (timer !== null) { clearInterval(timer); timer = null; }
+  }
+
+  function load(videoId, autoplay, start, muted, controls) {
+    var startSeconds = typeof start === 'number' && start >= 0 ? start : 0;
+    holdMute = muted === true;
+    if (player) {
+      // Mute before the new video starts so its sound never gets a first frame.
+      if (muted) player.mute();
+      if (autoplay) player.loadVideoById(videoId, startSeconds);
+      else player.cueVideoById(videoId, startSeconds);
+      return;
+    }
+    player = new YT.Player('player', {
+      host: host,
+      videoId: videoId,
+      width: '100%',
+      height: '100%',
+      playerVars: {
+        playsinline: 1,
+        rel: 0,
+        autoplay: autoplay ? 1 : 0,
+        mute: muted ? 1 : 0,
+        // No control bar and no keys means no way to unmute or scrub from inside
+        // the player; the embedding page keeps the whole transport to itself.
+        controls: controls === false ? 0 : 1,
+        disablekb: controls === false ? 1 : 0,
+        start: startSeconds,
+        origin: location.origin
+      },
+      events: {
+        onReady: function () { emit({ event: 'player-ready' }); },
+        onError: function (e) { emit({ event: 'error', code: e.data }); },
+        onStateChange: function (e) {
+          // The time rides along so a pause or a scrub can be placed without asking.
+          emit({ event: 'state', state: e.data, seconds: player.getCurrentTime() });
+          if (e.data === YT.PlayerState.PLAYING) startClock(); else stopClock();
+        }
+      }
+    });
+  }
+
+  function onYouTubeIframeAPIReady() {
+    var direct = params.get('v');
+    if (direct) load(direct, params.get('autoplay') === '1', Number(params.get('start')) || 0, params.get('mute') === '1', params.get('controls') !== '0');
+    emit({ event: 'ready' });
+  }
+
+  function onApiFailed() {
+    emit({ event: 'api-failed' });
+  }
+
+  window.addEventListener('message', function (event) {
+    var data = event.data;
+    if (!data || data.type !== TYPE || typeof data.command !== 'string') return;
+    if (owner === null) {
+      if (data.command !== 'load') return;
+      owner = event.source;
+      ownerOrigin = event.origin;
+    } else if (event.source !== owner) {
+      return;
+    }
+    if (typeof YT === 'undefined' || !YT.Player) return;
+    switch (data.command) {
+      case 'load':
+        if (typeof data.videoId === 'string' && /^[\w-]{11}$/.test(data.videoId)) {
+          load(data.videoId, data.autoplay === true, data.start, data.muted === true, data.controls !== false);
+        }
+        break;
+      case 'play': if (player) player.playVideo(); break;
+      case 'pause': if (player) player.pauseVideo(); break;
+      case 'mute': holdMute = true; if (player) player.mute(); break;
+      case 'unmute': holdMute = false; if (player) player.unMute(); break;
+      case 'seek':
+        if (player && typeof data.seconds === 'number') player.seekTo(data.seconds, true);
+        break;
+      case 'volume':
+        if (player && typeof data.level === 'number') player.setVolume(Math.max(0, Math.min(100, data.level)));
+        break;
+    }
+  });
+</script>
+<script src="https://www.youtube.com/iframe_api" onerror="onApiFailed()"></script>
+</body>
+</html>
