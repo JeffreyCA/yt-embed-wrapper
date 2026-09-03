@@ -134,6 +134,10 @@
       case 'volume':
         if (player && typeof data.level === 'number') player.setVolume(Math.max(0, Math.min(100, data.level)));
         break;
+      case 'rate':
+        // YouTube offers a fixed set of rates; anything else lands on the nearest one.
+        if (player && typeof data.rate === 'number' && data.rate > 0) player.setPlaybackRate(data.rate);
+        break;
     }
   });
 </script>

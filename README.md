@@ -52,6 +52,7 @@ Commands it accepts:
 | `play`, `pause`, `mute`, `unmute` | `mute` also holds the mute like a muted load; `unmute` releases it |
 | `seek` | `seconds` |
 | `volume` | `level` from 0 to 100 |
+| `rate` | `rate`, a playback speed multiplier; YouTube supports a fixed set (0.25 to 2 in steps) and picks the nearest |
 
 The first `load` binds the wrapper to whichever window sent it. After that, commands from other windows are ignored and events are only posted back to that origin. The initial `ready` event goes to `*` since nothing has been bound yet.
 
