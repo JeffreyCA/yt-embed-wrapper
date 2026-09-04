@@ -1,68 +1,83 @@
 # yt-embed-wrapper
 
-If you've ever embedded a YouTube video on a page running on `localhost` or a plain IP address, you've probably hit "This video is unavailable" on anything from a major label. YouTube decides whether a video can be embedded based on the hostname of the page that contains the player, and localhost doesn't make the cut.
+A static wrapper for embedding YouTube videos from `localhost` or a plain IP address.
 
-This repo is a small static page, hosted on GitHub Pages, that contains the player on your behalf. You embed the page in an iframe and tell it what to load over `postMessage`. Since the player lives on a real hostname, the videos play.
+YouTube blocks many label-owned videos when the player is embedded directly from a local development origin. This project hosts the player on GitHub Pages instead and lets the parent page control it with `postMessage`.
 
-- Demo: <https://jeffreyca.github.io/yt-embed-wrapper/>
-- Wrapper: <https://jeffreyca.github.io/yt-embed-wrapper/embed.html>
+- [Demo](https://jeffreyca.github.io/yt-embed-wrapper/)
+- [Wrapper](https://jeffreyca.github.io/yt-embed-wrapper/embed.html)
 
 ## Usage
 
 ```html
-<iframe id="yt" src="https://jeffreyca.github.io/yt-embed-wrapper/embed.html"
-        allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+<iframe
+  id="youtube"
+  src="https://jeffreyca.github.io/yt-embed-wrapper/embed.html"
+  allow="autoplay; encrypted-media; picture-in-picture"
+  allowfullscreen
+></iframe>
+
 <script>
-  const frame = document.getElementById('yt');
   const origin = 'https://jeffreyca.github.io';
-  window.addEventListener('message', ({ origin: from, data }) => {
-    if (from !== origin || data?.type !== 'yt-embed') return;
-    if (data.event === 'ready') {
-      frame.contentWindow.postMessage({ type: 'yt-embed', command: 'load', videoId: 'Zi_XLOBDo_Y' }, origin);
+  const frame = document.getElementById('youtube');
+
+  window.addEventListener('message', (event) => {
+    if (event.origin !== origin || event.data?.type !== 'yt-embed') return;
+
+    if (event.data.event === 'ready') {
+      frame.contentWindow.postMessage(
+        { type: 'yt-embed', command: 'load', videoId: 'Zi_XLOBDo_Y' },
+        origin,
+      );
     }
-    if (data.event === 'error') {
-      // 101 or 150 means the uploader disabled embedding, so link to YouTube instead.
+
+    if (event.data.event === 'error') {
+      console.error('YouTube player error:', event.data.code);
     }
   });
 </script>
 ```
 
-The player fills whatever size you give the iframe. If you just want to open a video without any messaging, `embed.html?v=<videoId>` works too, and you can add `autoplay=1`, `mute=1`, `controls=0`, or `start=<seconds>`.
+The player fills the iframe. Size the iframe or its container to fit your layout.
+
+For a direct embed without messaging, use `embed.html?v=<videoId>`. It also accepts `autoplay=1`, `mute=1`, `controls=0`, `start=<seconds>`, and `nocookie=0`. Autoplay remains subject to browser media policies.
 
 ## Messages
 
-Every message in either direction is an object with `type: 'yt-embed'`.
+Messages in both directions are objects with `type: 'yt-embed'`.
 
-Events sent by the wrapper:
-
-| Event | Meaning |
-|---|---|
-| `ready` | The API has loaded and it's safe to send `load` |
-| `api-failed` | The API script didn't load, usually because something blocked it |
-| `player-ready` | The player has been created |
-| `state` | A `YT.PlayerState` value in `state`, with the player's current time in `seconds` |
-| `error` | A YouTube error code in `code` (2, 5, 100, 101, 150, 153) |
-| `time` | `seconds` and `duration`, sent every 250 ms while playing |
-
-Commands it accepts:
+### Commands
 
 | Command | Fields |
-|---|---|
-| `load` | `videoId`, plus optional `autoplay`, `start`, `muted` (mute before the video starts and keep it muted while it plays, whatever the player's own chrome or an ad does, until an `unmute` command), and `controls: false` (no control bar and no player keys, so the viewer cannot unmute, scrub, or change the volume; the player's chrome is fixed when it is created, so this applies to the first `load` only) |
-| `play`, `pause`, `mute`, `unmute` | `mute` also holds the mute like a muted load; `unmute` releases it |
+| --- | --- |
+| `load` | `videoId`, optional `autoplay`, `start`, `muted`, and `controls` |
+| `play`, `pause`, `mute`, `unmute` | None |
 | `seek` | `seconds` |
-| `volume` | `level` from 0 to 100 |
-| `rate` | `rate`, a playback speed multiplier; YouTube supports a fixed set (0.25 to 2 in steps) and picks the nearest |
+| `volume` | `level` from `0` to `100` |
+| `rate` | Positive playback speed in `rate`; YouTube selects the nearest supported value |
 
-The first `load` binds the wrapper to whichever window sent it. After that, commands from other windows are ignored and events are only posted back to that origin. The initial `ready` event goes to `*` since nothing has been bound yet.
+A muted load stays muted until `unmute` is sent. Passing `controls: false` hides the control bar and disables player keyboard controls, but only applies to the first `load` because YouTube fixes the player chrome when it is created.
 
-## Privacy
+### Events
 
-The player uses `youtube-nocookie.com` by default, which means YouTube doesn't set any cookies until someone actually presses play. Pass `nocookie=0` if you'd rather use the regular domain. Beyond that, GitHub sees the request for the page and YouTube sees an ordinary embed with this page as the referrer. There's no analytics and nothing is stored.
+| Event | Fields | Meaning |
+| --- | --- | --- |
+| `ready` | None | The iframe API loaded and `load` can be sent |
+| `api-failed` | None | The iframe API script failed to load |
+| `player-ready` | None | The YouTube player was created |
+| `state` | `state`, `seconds` | Playback changed to a `YT.PlayerState` value |
+| `time` | `seconds`, `duration` | Position update sent every 250 ms while playing |
+| `error` | `code` | YouTube reported an error |
 
-## Limitations
+The first valid `load` binds the wrapper to its sender. Commands from other windows are then ignored, and events are sent only to the bound origin. The initial `ready` event uses `*` because no parent has been bound yet, so parent pages should validate `event.origin`.
 
-This only helps with the hostname check. Videos whose uploader has turned off embedding will still fail with error 101 or 150 no matter where they're embedded, and content blockers can prevent the API script from loading, which shows up as `api-failed`. In both cases the sensible fallback is a link to the video on YouTube.
+## Privacy and limitations
+
+The wrapper uses `youtube-nocookie.com` by default and has no analytics or storage. Pass `nocookie=0` to use the regular YouTube domain.
+
+This only works around YouTube's hostname check. Videos whose uploader disabled embedding still fail with error `101` or `150`, and content blockers may prevent the API from loading. In either case, fall back to a link on YouTube.
+
+The project is entirely static, so you can also host `embed.html` on your own HTTPS domain.
 
 ## License
 
